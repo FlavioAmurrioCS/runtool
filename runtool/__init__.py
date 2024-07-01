@@ -282,7 +282,7 @@ class _ToolInstallerBase(Protocol):
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            (self.get_executable(), *args),  # noqa: S603
+            (self.get_executable(), *args),
             text=True,
             errors="ignore",
             encoding="utf-8",
@@ -732,7 +732,7 @@ class ShivInstallSource(_ToolInstallerBase):
         if not os.path.exists(bin_path):
             shiv_executable = self.SHIV_EXECUTABLE_PROVIDER.get_executable()
             subprocess.run(
-                (  # noqa: S603
+                (
                     all_pythons()[0],
                     shiv_executable,
                     "-c",
@@ -778,7 +778,7 @@ class GitProjectInstallSource(_ToolInstallerBase):
         git_bin = self.executable_path()
         if not os.path.exists(git_bin):
             subprocess.run(
-                (  # noqa: S603
+                (
                     "git",
                     "clone",
                     "-b",
@@ -809,7 +809,7 @@ class ZipTarInstallSource(LinkInstaller):
 
 def pipecmd(cmd: Sequence[str], input: str) -> str:  # noqa: A002
     return subprocess.run(
-        cmd,  # noqa: S603
+        cmd,
         input=input,
         check=True,
         stdout=subprocess.PIPE,
@@ -920,7 +920,7 @@ class PipxInstallSource(_ToolInstallerBase):
                 "PIPX_HOME": TOOL_INSTALLER_CONFIG.PIPX_HOME,
             }
             subprocess.run(
-                (  # noqa: S603
+                (
                     pipx_cmd,
                     "install",
                     "--force",
@@ -935,7 +935,7 @@ class PipxInstallSource(_ToolInstallerBase):
         if os.path.exists(self.executable_path()):
             pipx_cmd = self.PIPX_EXECUTABLE_PROVIDER.get_executable()
             subprocess.run(
-                (  # noqa: S603
+                (
                     pipx_cmd,
                     "uninstall",
                     self.package,
@@ -1248,7 +1248,7 @@ class CLIMultiInstaller(CLIApp):
         )
 
         result = subprocess.run(
-            (_fzf_executable or "fzf", "--multi"),  # noqa: S603
+            (_fzf_executable or "fzf", "--multi"),
             input="\n".join(
                 f"{tool:30} {description}"
                 for tool, description in RUNTOOL_CONFIG.tools_descriptions().items()
