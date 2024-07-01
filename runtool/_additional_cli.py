@@ -59,7 +59,7 @@ class PipxConfigCLI(CLIApp):
     @classmethod
     def run(cls, argv: Sequence[str] | None = None) -> int:  # noqa: ARG003
         result = subprocess.run(
-            (PipxInstallSource.PIPX_EXECUTABLE_PROVIDER.get_executable(), "list", "--json"),  # noqa: S603
+            (PipxInstallSource.PIPX_EXECUTABLE_PROVIDER.get_executable(), "list", "--json"),
             check=True,
             capture_output=True,
         )
