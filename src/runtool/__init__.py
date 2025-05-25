@@ -27,27 +27,27 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from functools import lru_cache
 from textwrap import dedent
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Dict
 from typing import Generator
 from typing import List
 from typing import NamedTuple
-from typing import overload
 from typing import Sequence
-from typing import TYPE_CHECKING
 from typing import Union
+from typing import overload
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
-
 if TYPE_CHECKING:
-    from requests import PreparedRequest
-    import requests
-    from typing import Protocol  # python3.8+
+    from _collections_abc import dict_keys
     from typing import Literal
+    from typing import Protocol  # python3.8+
+
+    import requests
+    from requests import PreparedRequest
     from typing_extensions import Self
     from typing_extensions import TypeAlias
-    from _collections_abc import dict_keys
 
     JSON_TYPE: TypeAlias = Union[str, int, float, bool, None, List[Any], Dict[str, Any]]
 else:
@@ -103,7 +103,7 @@ def selection(options: list[str]) -> str | None:
     if len(options) == 1 or os.environ.get("CI"):
         return options[0]
     print(
-        f'{BColors.OKCYAN}{"#" * 100}\nPlease select one of the following options:\n{"#" * 100}{BColors.RESET}',  # noqa: E501
+        f"{BColors.OKCYAN}{'#' * 100}\nPlease select one of the following options:\n{'#' * 100}{BColors.RESET}",  # noqa: E501
         file=sys.stderr,
     )
     try:
@@ -282,7 +282,7 @@ class _ToolInstallerBase(Protocol):
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            (self.get_executable(), *args),  # noqa: S603
+            (self.get_executable(), *args),
             text=True,
             errors="ignore",
             encoding="utf-8",
@@ -634,7 +634,7 @@ class _GitHubSource:
 
     def _links_from_html(self) -> list[str]:
         url = (
-            f'{self.project_url}/releases/{"latest" if self.tag == "latest" else f"tag/{self.tag}"}'
+            f"{self.project_url}/releases/{'latest' if self.tag == 'latest' else f'tag/{self.tag}'}"
         )
         html = get_request(url)
         download_links: list[str] = []
@@ -731,8 +731,8 @@ class ShivInstallSource(_ToolInstallerBase):
         bin_path = self.executable_path()
         if not os.path.exists(bin_path):
             shiv_executable = self.SHIV_EXECUTABLE_PROVIDER.get_executable()
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     all_pythons()[0],
                     shiv_executable,
                     "-c",
@@ -777,8 +777,8 @@ class GitProjectInstallSource(_ToolInstallerBase):
         git_project_location = self.git_project_location()
         git_bin = self.executable_path()
         if not os.path.exists(git_bin):
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     "git",
                     "clone",
                     "-b",
@@ -808,8 +808,8 @@ class ZipTarInstallSource(LinkInstaller):
 
 
 def pipecmd(cmd: Sequence[str], input: str) -> str:  # noqa: A002
-    return subprocess.run(
-        cmd,  # noqa: S603
+    return subprocess.run(  # noqa: S603
+        cmd,
         input=input,
         check=True,
         stdout=subprocess.PIPE,
@@ -919,8 +919,8 @@ class PipxInstallSource(_ToolInstallerBase):
                 "PIPX_BIN_DIR": TOOL_INSTALLER_CONFIG.BIN_DIR,
                 "PIPX_HOME": TOOL_INSTALLER_CONFIG.PIPX_HOME,
             }
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     pipx_cmd,
                     "install",
                     "--force",
@@ -934,8 +934,8 @@ class PipxInstallSource(_ToolInstallerBase):
     def uninstall(self) -> None:
         if os.path.exists(self.executable_path()):
             pipx_cmd = self.PIPX_EXECUTABLE_PROVIDER.get_executable()
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     pipx_cmd,
                     "uninstall",
                     self.package,
@@ -1012,7 +1012,7 @@ class _RunToolConfig:
 
             with importlib_path(__package__, config_filename) as ipath:  # pyright: ignore[reportArgumentType]
                 foo.append(ipath.as_posix())
-        return list({x: None for x in foo}.keys())
+        return list(dict.fromkeys(foo).keys())
 
     @lru_cache(maxsize=1)  # noqa: B019
     def tools_descriptions(self) -> dict[str, str]:
@@ -1022,7 +1022,7 @@ class _RunToolConfig:
 
     @lru_cache(maxsize=1)  # noqa: B019
     def tools(self) -> dict_keys[str, None]:
-        return {x: None for x in sorted(self.config.sections())}.keys()
+        return dict.fromkeys(sorted(self.config.sections())).keys()
 
     @lru_cache(maxsize=None)  # noqa: B019
     def get_executable_provider(self, command: str) -> ExecutableProvider:
@@ -1083,11 +1083,11 @@ class CLIApp(Protocol):
                 kwargs["nargs"] = "+"
             if hasattr(cls, field):
                 kwargs["default"] = getattr(cls, field)
-                field_arg = f'--{field.replace("_", "-")}'
+                field_arg = f"--{field.replace('_', '-')}"
             if "None" in ztype:
-                field_arg = f'--{field.replace("_", "-")}'
+                field_arg = f"--{field.replace('_', '-')}"
             if "Literal" in ztype:
-                kwargs["choices"] = eval(ztype.split("Literal")[1].split("[")[1].split("]")[0])  # noqa: PGH001, S307
+                kwargs["choices"] = eval(ztype.split("Literal")[1].split("[")[1].split("]")[0])  # noqa: S307
             parser.add_argument(field_arg, **kwargs)  # type:ignore
         return parser
 
@@ -1171,7 +1171,7 @@ class CLIRun(CLIApp):
                     TOOL_INSTALLER_PIPX_HOME:       {TOOL_INSTALLER_CONFIG.PIPX_HOME}
                     TOOL_INSTALLER_PACKAGE_DIR:     {TOOL_INSTALLER_CONFIG.PACKAGE_DIR}
                     TOOL_INSTALLER_GIT_PROJECT_DIR: {TOOL_INSTALLER_CONFIG.GIT_PROJECT_DIR}
-                    RUNTOOL_CONFIG:                 {os.environ.get('RUNTOOL_CONFIG', '')}
+                    RUNTOOL_CONFIG:                 {os.environ.get("RUNTOOL_CONFIG", "")}
                     """
             )
 
@@ -1248,7 +1248,7 @@ class CLIMultiInstaller(CLIApp):
         )
 
         result = subprocess.run(
-            (_fzf_executable or "fzf", "--multi"),  # noqa: S603
+            (_fzf_executable or "fzf", "--multi"),
             input="\n".join(
                 f"{tool:30} {description}"
                 for tool, description in RUNTOOL_CONFIG.tools_descriptions().items()
@@ -1438,7 +1438,7 @@ class CLIFormatIni(CLIApp):
                     v["description"] = d
                     continue
             else:
-                print(f'Could not get description for {v["class"]}', file=sys.stderr)
+                print(f"Could not get description for {v['class']}", file=sys.stderr)
 
         order_config.read_dict(dct)
         with open(args.output, "w") as f:
