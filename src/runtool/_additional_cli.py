@@ -5,15 +5,16 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Sequence
 from typing import TYPE_CHECKING
-
+from typing import Sequence
 
 if TYPE_CHECKING:
     from runtool._types import PipxList
 
 
-from runtool import RUNTOOL_CONFIG, CLIApp, PipxInstallSource
+from runtool import RUNTOOL_CONFIG
+from runtool import CLIApp
+from runtool import PipxInstallSource
 
 
 class CommaFixer(CLIApp):
@@ -58,8 +59,8 @@ class PipxConfigCLI(CLIApp):
 
     @classmethod
     def run(cls, argv: Sequence[str] | None = None) -> int:  # noqa: ARG003
-        result = subprocess.run(
-            (PipxInstallSource.PIPX_EXECUTABLE_PROVIDER.get_executable(), "list", "--json"),  # noqa: S603
+        result = subprocess.run(  # noqa: S603
+            (PipxInstallSource.PIPX_EXECUTABLE_PROVIDER.get_executable(), "list", "--json"),
             check=True,
             capture_output=True,
         )

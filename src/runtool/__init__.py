@@ -27,31 +27,33 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from functools import lru_cache
 from textwrap import dedent
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Dict
 from typing import Generator
 from typing import List
 from typing import NamedTuple
-from typing import overload
 from typing import Sequence
-from typing import TYPE_CHECKING
 from typing import Union
+from typing import overload
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
-
 if TYPE_CHECKING:
-    from requests import PreparedRequest
-    import requests
-    from typing import Protocol  # python3.8+
+    from _collections_abc import dict_keys
     from typing import Literal
+    from typing import Protocol  # python3.8+
+
+    import requests
+    from requests import PreparedRequest
     from typing_extensions import Self
     from typing_extensions import TypeAlias
-    from _collections_abc import dict_keys
 
     JSON_TYPE: TypeAlias = Union[str, int, float, bool, None, List[Any], Dict[str, Any]]
 else:
     Protocol = object
+
+logger = logging.getLogger(__name__)
 
 
 def gron(obj: JSON_TYPE) -> list[str]:
@@ -103,7 +105,7 @@ def selection(options: list[str]) -> str | None:
     if len(options) == 1 or os.environ.get("CI"):
         return options[0]
     print(
-        f'{BColors.OKCYAN}{"#" * 100}\nPlease select one of the following options:\n{"#" * 100}{BColors.RESET}',  # noqa: E501
+        f"{BColors.OKCYAN}{'#' * 100}\nPlease select one of the following options:\n{'#' * 100}{BColors.RESET}",  # noqa: E501
         file=sys.stderr,
     )
     try:
@@ -208,7 +210,7 @@ def get_request(url: str) -> str:
 
 @contextmanager
 def download_context(url: str) -> Generator[str, None, None]:
-    logging.info("Downloading: %s", url)
+    logger.info("Downloading: %s", url)
     derive_name = os.path.basename(url)
     with tempfile.TemporaryDirectory() as tempdir:
         download_path = os.path.join(tempdir, derive_name)
@@ -281,8 +283,8 @@ class _ToolInstallerBase(Protocol):
         return self.get_executable()
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            (self.get_executable(), *args),  # noqa: S603
+        return subprocess.run(  # noqa: S603
+            (self.get_executable(), *args),
             text=True,
             errors="ignore",
             encoding="utf-8",
@@ -294,13 +296,11 @@ class _ToolInstallerBase(Protocol):
         class_name = self.__class__.__name__
 
         m_asdict: dict[str, str] = (
-            asdict(self)  # type:ignore
-            if dataclasses.is_dataclass(self)
-            else self._asdict()  # type:ignore
+            asdict(self) if dataclasses.is_dataclass(self) else self._asdict()  # type:ignore[attr-defined]
         )
 
         with suppress(Exception):
-            anno: dict[str, dataclasses.Field] = self.__class__.__dataclass_fields__  # type:ignore
+            anno: dict[str, dataclasses.Field] = self.__class__.__dataclass_fields__  # type:ignore[attr-defined,type-arg]
             for k, v in anno.items():
                 if m_asdict[k] == v.default:
                     del m_asdict[k]
@@ -400,7 +400,7 @@ class InternetInstaller(_ToolInstallerBase, Protocol):
 
         result = cls.find_executable(package_path, executable_name)
         if not result:
-            logging.error("%s not found in %s", executable_name, package_path)
+            logger.error("%s not found in %s", executable_name, package_path)
             raise SystemExit(1)
 
         executable = cls.make_executable(result)
@@ -409,7 +409,7 @@ class InternetInstaller(_ToolInstallerBase, Protocol):
         symlink_path = os.path.join(TOOL_INSTALLER_CONFIG.BIN_DIR, rename)
         if os.path.isfile(symlink_path):
             if not os.path.islink(symlink_path):
-                logging.info(
+                logger.info(
                     "File is already in %s with name %s",
                     TOOL_INSTALLER_CONFIG.BIN_DIR,
                     os.path.basename(executable),
@@ -557,7 +557,7 @@ class LinkInstaller(InternetInstaller, Protocol):
                     os.path.dirname(realpath[len(TOOL_INSTALLER_CONFIG.PACKAGE_DIR) + 1 :]),
                 )
                 if not realpath.startswith(package_dir):
-                    logging.error("Not able to uninstall %s", realpath)
+                    logger.error("Not able to uninstall %s", realpath)
                     raise SystemExit(1)
                 rm_shim(package_dir)
             rm_shim(executable_path)
@@ -572,7 +572,7 @@ class LinkInstaller(InternetInstaller, Protocol):
         rename = rename or binary
         download_url = _BEST_LINK_SERVICE.pick(links)
         if not download_url:
-            logging.error("Could not choose appropiate download from %s", rename)
+            logger.error("Could not choose appropiate download from %s", rename)
             raise SystemExit(1)
         basename = os.path.basename(download_url)
         if any(basename.endswith(x) for x in (".zip", ".tgz", ".tbz", ".gz")) or ".tar" in basename:
@@ -634,7 +634,7 @@ class _GitHubSource:
 
     def _links_from_html(self) -> list[str]:
         url = (
-            f'{self.project_url}/releases/{"latest" if self.tag == "latest" else f"tag/{self.tag}"}'
+            f"{self.project_url}/releases/{'latest' if self.tag == 'latest' else f'tag/{self.tag}'}"
         )
         html = get_request(url)
         download_links: list[str] = []
@@ -654,7 +654,7 @@ class _GitHubSource:
                     )
                 ]
             else:
-                logging.error("Not assets urls")
+                logger.error("Not assets urls")
         return download_links
 
     def _links_from_api(self) -> list[str]:
@@ -664,7 +664,7 @@ class _GitHubSource:
             )
             return [x["browser_download_url"] for x in data[0]["assets"]]
         except Exception:
-            logging.exception("Not able to get releases from github api")
+            logger.exception("Not able to get releases from github api")
             return []
 
     def links(self) -> list[str]:
@@ -731,8 +731,8 @@ class ShivInstallSource(_ToolInstallerBase):
         bin_path = self.executable_path()
         if not os.path.exists(bin_path):
             shiv_executable = self.SHIV_EXECUTABLE_PROVIDER.get_executable()
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     all_pythons()[0],
                     shiv_executable,
                     "-c",
@@ -777,8 +777,8 @@ class GitProjectInstallSource(_ToolInstallerBase):
         git_project_location = self.git_project_location()
         git_bin = self.executable_path()
         if not os.path.exists(git_bin):
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     "git",
                     "clone",
                     "-b",
@@ -808,8 +808,8 @@ class ZipTarInstallSource(LinkInstaller):
 
 
 def pipecmd(cmd: Sequence[str], input: str) -> str:  # noqa: A002
-    return subprocess.run(
-        cmd,  # noqa: S603
+    return subprocess.run(  # noqa: S603
+        cmd,
         input=input,
         check=True,
         stdout=subprocess.PIPE,
@@ -833,7 +833,7 @@ class GronInstaller(LinkInstaller):
 
         ret = []
 
-        base_url_path = urlparse(self.url)._replace(params=None, query=None, fragment=None).geturl()  # type:ignore
+        base_url_path = urlparse(self.url)._replace(params=None, query=None, fragment=None).geturl()  # type:ignore[arg-type]
 
         for _, value in (
             line.rstrip(";").split(" = ", maxsplit=1) for line in gron_lines if pattern.search(line)
@@ -919,8 +919,8 @@ class PipxInstallSource(_ToolInstallerBase):
                 "PIPX_BIN_DIR": TOOL_INSTALLER_CONFIG.BIN_DIR,
                 "PIPX_HOME": TOOL_INSTALLER_CONFIG.PIPX_HOME,
             }
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     pipx_cmd,
                     "install",
                     "--force",
@@ -934,8 +934,8 @@ class PipxInstallSource(_ToolInstallerBase):
     def uninstall(self) -> None:
         if os.path.exists(self.executable_path()):
             pipx_cmd = self.PIPX_EXECUTABLE_PROVIDER.get_executable()
-            subprocess.run(
-                (  # noqa: S603
+            subprocess.run(  # noqa: S603
+                (
                     pipx_cmd,
                     "uninstall",
                     self.package,
@@ -1012,7 +1012,7 @@ class _RunToolConfig:
 
             with importlib_path(__package__, config_filename) as ipath:  # pyright: ignore[reportArgumentType]
                 foo.append(ipath.as_posix())
-        return list({x: None for x in foo}.keys())
+        return list(dict.fromkeys(foo).keys())
 
     @lru_cache(maxsize=1)  # noqa: B019
     def tools_descriptions(self) -> dict[str, str]:
@@ -1022,7 +1022,7 @@ class _RunToolConfig:
 
     @lru_cache(maxsize=1)  # noqa: B019
     def tools(self) -> dict_keys[str, None]:
-        return {x: None for x in sorted(self.config.sections())}.keys()
+        return dict.fromkeys(sorted(self.config.sections())).keys()
 
     @lru_cache(maxsize=None)  # noqa: B019
     def get_executable_provider(self, command: str) -> ExecutableProvider:
@@ -1083,12 +1083,12 @@ class CLIApp(Protocol):
                 kwargs["nargs"] = "+"
             if hasattr(cls, field):
                 kwargs["default"] = getattr(cls, field)
-                field_arg = f'--{field.replace("_", "-")}'
+                field_arg = f"--{field.replace('_', '-')}"
             if "None" in ztype:
-                field_arg = f'--{field.replace("_", "-")}'
+                field_arg = f"--{field.replace('_', '-')}"
             if "Literal" in ztype:
-                kwargs["choices"] = eval(ztype.split("Literal")[1].split("[")[1].split("]")[0])  # noqa: PGH001, S307
-            parser.add_argument(field_arg, **kwargs)  # type:ignore
+                kwargs["choices"] = eval(ztype.split("Literal")[1].split("[")[1].split("]")[0])  # noqa: S307
+            parser.add_argument(field_arg, **kwargs)  # type: ignore[arg-type]
         return parser
 
     @overload
@@ -1112,7 +1112,7 @@ class CLIApp(Protocol):
         cls, argv: Sequence[str] | None = None, *, allow_unknown_args: bool = False
     ) -> tuple[Self, list[str]] | Self:
         return (
-            cls.parser().parse_known_args(argv)  # type: ignore
+            cls.parser().parse_known_args(argv)  # type:ignore[return-value]
             if allow_unknown_args
             else cls.parser().parse_args(argv)
         )
@@ -1171,7 +1171,7 @@ class CLIRun(CLIApp):
                     TOOL_INSTALLER_PIPX_HOME:       {TOOL_INSTALLER_CONFIG.PIPX_HOME}
                     TOOL_INSTALLER_PACKAGE_DIR:     {TOOL_INSTALLER_CONFIG.PACKAGE_DIR}
                     TOOL_INSTALLER_GIT_PROJECT_DIR: {TOOL_INSTALLER_CONFIG.GIT_PROJECT_DIR}
-                    RUNTOOL_CONFIG:                 {os.environ.get('RUNTOOL_CONFIG', '')}
+                    RUNTOOL_CONFIG:                 {os.environ.get("RUNTOOL_CONFIG", "")}
                     """
             )
 
@@ -1247,8 +1247,8 @@ class CLIMultiInstaller(CLIApp):
             shutil.which("fzf") or shutil.which(",fzf") or FZF_EXECUTABLE_PROVIDER.get_executable()
         )
 
-        result = subprocess.run(
-            (_fzf_executable or "fzf", "--multi"),  # noqa: S603
+        result = subprocess.run(  # noqa: S603
+            (_fzf_executable or "fzf", "--multi"),
             input="\n".join(
                 f"{tool:30} {description}"
                 for tool, description in RUNTOOL_CONFIG.tools_descriptions().items()
@@ -1321,7 +1321,7 @@ class CLILinkInstaller(CLIApp):
             binary = counter.most_common(1)[0][0]
 
         path = LinkInstaller.install_best(
-            InternetInstaller,  # type:ignore
+            InternetInstaller,  # type: ignore[arg-type]
             links=args.links,
             binary=binary,
             rename=args.rename,
@@ -1438,7 +1438,7 @@ class CLIFormatIni(CLIApp):
                     v["description"] = d
                     continue
             else:
-                print(f'Could not get description for {v["class"]}', file=sys.stderr)
+                print(f"Could not get description for {v['class']}", file=sys.stderr)
 
         order_config.read_dict(dct)
         with open(args.output, "w") as f:

@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from typing import Any
     from typing import Dict
     from typing import Literal
+
     from typing_extensions import TypedDict
 
     InjectedPackages = Dict[str, str]

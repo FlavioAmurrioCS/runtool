@@ -21,6 +21,8 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -30,61 +32,94 @@ dependencies = [
   "typing_extensions",
 ]
 
-[project.scripts]
-runtool = "runtool:main"
+[project.optional-dependencies]
+types = [
+  "pytest",
+  "types-requests",
+]
+tests = [
+  "runtool[types]",
+]
 
 [project.urls]
 Documentation = "https://github.com/FlavioAmurrioCS/runtool#readme"
 Issues = "https://github.com/FlavioAmurrioCS/runtool/issues"
 Source = "https://github.com/FlavioAmurrioCS/runtool"
 
+[project.scripts]
+runtool = "runtool:main"
+
+###############################################################################
+# region: hatch
+###############################################################################
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "runtool/_version.py"
+version-file = "src/runtool/_version.py"
 
-[tool.hatch.envs.default]
-dependencies = [
-  "coverage[toml]>=6.5",
-  "pytest",
+[tool.hatch.envs.hatch-test]
+extra-dependencies = [
+  "runtool[tests]",
 ]
-[tool.hatch.envs.default.scripts]
-test = "pytest {args:tests}"
-test-cov = "coverage run -m pytest {args:tests}"
-cov-report = [
-  "- coverage combine",
-  "coverage report",
-  "coverage xml",
-]
-cov = [
-  "test-cov",
-  "cov-report",
-]
-
-[[tool.hatch.envs.all.matrix]]
-python = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
 [tool.hatch.envs.types]
-dependencies = [
+extra-dependencies = [
   "mypy>=1.0.0",
+  "runtool[types]",
 ]
+
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:runtool.py}"
+check = "mypy --install-types --non-interactive {args:src/runtool tests}"
+###############################################################################
+# endregion: hatch
+###############################################################################
 
-[tool.hatch.build.targets.sdist]
-include = [
-  "/runtool",
+###############################################################################
+# region: uv
+###############################################################################
+[tool.uv.pip]
+index-url = "https://pypi.org/simple"
+###############################################################################
+# endregion: uv
+###############################################################################
+
+###############################################################################
+# region: coverage
+###############################################################################
+[tool.coverage.run]
+source_pkgs = ["runtool", "tests"]
+branch = true
+parallel = true
+omit = [
 ]
 
+[tool.coverage.paths]
+runtool = ["src/runtool"]
+tests = ["tests"]
 
-# COMMON SETTINGS BELOW
-[tool.hatch.envs.hatch-static-analysis]
-config-path = "none"
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+###############################################################################
+# endregion: coverage
+###############################################################################
 
+###############################################################################
+# region: pyright
+###############################################################################
 [tool.pyright]
 pythonVersion = "3.8"
+###############################################################################
+# endregion: pyright
+###############################################################################
 
+###############################################################################
+# region: mypy
+###############################################################################
 [tool.mypy]
 python_version = "3.8"
 check_untyped_defs = true
@@ -94,7 +129,18 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+###############################################################################
+# endregion: mypy
+###############################################################################
 
+###############################################################################
+# region: ruff
+###############################################################################
+[tool.hatch.envs.hatch-static-analysis]
+config-path = "none"
+
+[tool.ruff.lint.isort]
+force-single-line = true
 
 [tool.ruff]
 line-length = 100
@@ -104,48 +150,23 @@ select = [
   "ALL",
 ]
 ignore = [
-  "ANN101", # missing-type-self
-  "ANN102", # missing-type-cls
   "COM812", # missing-trailing-comma
-  "D100",   # undocumented-public-module
-  "D101",   # undocumented-public-class
-  "D102",   # undocumented-public-method
-  "D103",   # undocumented-public-function
-  "D104",   # undocumented-public-package
-  "D105",   # undocumented-magic-method
-  "D107",   # undocumented-public-init
+  "D",      # pydocstyle
   "ERA001", # commented-out-code
-  "I",      # isort # DO NOT ENABLE https://github.com/astral-sh/ruff/issues/4670
+  "EXE003", # shebang-missing-python
   "ISC001", # single-line-implicit-string-concatenation
-  "PGH003", # blanket-type-ignore
-  "PTH",    # flake8-use-pathlib # DO NOT ENABLE, we prefere non pathlib
-  "T20",    # flake8-print # DO NOT ENABLE, we use prints
-  "D203",   # one-blank-line-before-class
-  "D212",   # multi-line-summary-first-line
-  "D401",   # non-imperative-mood
+  "PTH",    # flake8-use-pathlib
+  "T20",    # flake8-print
 ]
 
 [tool.ruff.format]
 docstring-code-format = true
 docstring-code-line-length = 100
 
-# https://github.com/astral-sh/ruff/issues/4368
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
-  "S101",   # assert
-  "E501",   # line-too-long
-  "INP001", # implicit-namespace-package
+  "S101",
 ]
-
-[tool.tox]
-legacy_tox_ini = """
-    [tox]
-    skip_missing_interpreters = True
-    envlist = py38, py39, py310, py311, py312
-
-    [testenv]
-    deps = pytest
-    commands =
-        ; mypy --ignore-missing-imports --scripts-are-modules comma
-        pytest -W ignore::DeprecationWarning -W ignore::PendingDeprecationWarning {posargs:tests}
-"""
+###############################################################################
+# endregion: ruff
+###############################################################################

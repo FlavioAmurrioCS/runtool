@@ -8,8 +8,8 @@ from unittest import mock
 import pytest
 
 import runtool
-from runtool import ExecutableProvider
 from runtool import RUNTOOL_CONFIG
+from runtool import ExecutableProvider
 from runtool import ToolInstallerConfig
 
 
