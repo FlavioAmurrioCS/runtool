@@ -28,11 +28,12 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
+        additional_dependencies: [types-requests]
   - repo: local
     hooks:
       - id: format-runtool-ini
         name: format-runtool-ini
-        entry: runtool/__init__.py format-ini runtool/runtool.ini --output runtool/runtool.ini
+        entry: src/runtool/__init__.py format-ini src/runtool/runtool.ini --output src/runtool/runtool.ini
         language: system
         pass_filenames: false
         always_run: true
