@@ -215,8 +215,7 @@ def download_context(url: str) -> Generator[str, None, None]:
     with tempfile.TemporaryDirectory() as tempdir:
         download_path = os.path.join(tempdir, derive_name)
         with open(download_path, "wb") as file, default_session().get(url, stream=True) as response:
-            for chunk in response.iter_content(chunk_size=4 * 1024):
-                file.write(chunk)
+            file.writelines(response.iter_content(chunk_size=4 * 1024))
         yield download_path
 
 
