@@ -1,9 +1,11 @@
 {
   "project_name": "runtool",
-  "project_slug": "runtool",
+  "package_name": "runtool",
+  "module_name": "runtool",
   "project_short_description": "Install binary from github release.",
-  "minimum_python_version": "3.8",
+  "minimum_python_version": "3.9",
   "full_name": "Flavio Amurrio",
   "email": "25621374+FlavioAmurrioCS@users.noreply.github.com",
-  "github_username": "FlavioAmurrioCS"
+  "github_username": "FlavioAmurrioCS",
+  "project_slug": "runtool"
 }

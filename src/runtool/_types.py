@@ -4,14 +4,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from typing import Any
-    from typing import Dict
     from typing import Literal
 
     from typing_extensions import TypedDict
 
-    InjectedPackages = Dict[str, str]
+    InjectedPackages = dict[str, str]
 
-    PathItem = Dict[Literal["__Path__", "__type__"], str]
+    PathItem = dict[Literal["__Path__", "__type__"], str]
 
     class MainPackage(TypedDict):
         app_paths: list[PathItem]
