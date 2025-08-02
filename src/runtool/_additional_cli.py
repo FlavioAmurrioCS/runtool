@@ -6,9 +6,10 @@ import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
-from typing import Sequence
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from runtool._types import PipxList
 
 

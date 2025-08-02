@@ -25,15 +25,12 @@ from contextlib import contextmanager
 from contextlib import suppress
 from dataclasses import asdict
 from dataclasses import dataclass
+from functools import cache
 from functools import lru_cache
 from textwrap import dedent
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Dict
-from typing import Generator
-from typing import List
 from typing import NamedTuple
-from typing import Sequence
 from typing import Union
 from typing import overload
 from urllib.parse import urljoin
@@ -41,6 +38,8 @@ from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from _collections_abc import dict_keys
+    from collections.abc import Generator
+    from collections.abc import Sequence
     from typing import Literal
     from typing import Protocol  # python3.8+
 
@@ -49,7 +48,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
     from typing_extensions import TypeAlias
 
-    JSON_TYPE: TypeAlias = Union[str, int, float, bool, None, List[Any], Dict[str, Any]]
+    JSON_TYPE: TypeAlias = Union[str, int, float, bool, None, list[Any], dict[str, Any]]
 else:
     Protocol = object
 
@@ -145,7 +144,7 @@ def all_pythons() -> tuple[str, ...]:
     ) or (sys.executable,)
 
 
-@lru_cache(maxsize=None)
+@cache
 def domain_env_name(domain: str) -> str:
     domain = domain.upper()
     if domain in {"API.GITHUB.COM", "GITHUB.COM"}:
@@ -215,8 +214,7 @@ def download_context(url: str) -> Generator[str, None, None]:
     with tempfile.TemporaryDirectory() as tempdir:
         download_path = os.path.join(tempdir, derive_name)
         with open(download_path, "wb") as file, default_session().get(url, stream=True) as response:
-            for chunk in response.iter_content(chunk_size=4 * 1024):
-                file.write(chunk)
+            file.writelines(response.iter_content(chunk_size=4 * 1024))
         yield download_path
 
 
@@ -384,9 +382,10 @@ class InternetInstaller(_ToolInstallerBase, Protocol):
             not os.path.exists(package_path)
             or cls.find_executable(package_path, executable_name) is None
         ):
-            with download_context(
-                package_url
-            ) as tar_zip_file, tempfile.TemporaryDirectory() as tempdir:
+            with (
+                download_context(package_url) as tar_zip_file,
+                tempfile.TemporaryDirectory() as tempdir,
+            ):
                 temp_extract_path = os.path.join(tempdir, "temp_package")
                 with cls.uncompress(tar_zip_file) as untar_unzip_file:
                     if isinstance(untar_unzip_file, gzip.GzipFile):
@@ -1024,7 +1023,7 @@ class _RunToolConfig:
     def tools(self) -> dict_keys[str, None]:
         return dict.fromkeys(sorted(self.config.sections())).keys()
 
-    @lru_cache(maxsize=None)  # noqa: B019
+    @cache  # noqa: B019
     def get_executable_provider(self, command: str) -> ExecutableProvider:
         obj = dict(self.config[command])
         class_name = obj.pop("class")

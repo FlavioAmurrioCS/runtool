@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import random
-from typing import Generator
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -11,6 +11,9 @@ import runtool
 from runtool import RUNTOOL_CONFIG
 from runtool import ExecutableProvider
 from runtool import ToolInstallerConfig
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 @pytest.fixture(autouse=True)
