@@ -141,7 +141,7 @@ def all_pythons() -> tuple[str, ...]:
             "python3.13",
         )
         if shutil.which(x)
-    ) or (sys.executable,)
+    )
 
 
 @cache
