@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import functools
+import gzip
 import hashlib
 import json
 import logging
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
     P = ParamSpec("P")
 
     class CacheEntry(TypedDict):
-        timestampt: float
+        timestamp: float
         data: object
 
     class TimeDeltaArg(TypedDict, total=False):
@@ -115,7 +116,7 @@ logger = logging.getLogger("runtool")
 # region: Utilities
 ################################################################################
 @contextmanager
-def timing_ctx(name: str) -> Generator[None]:
+def time_block(name: str) -> Generator[None]:
     """Context manager to time a block of code."""
     t0 = time.monotonic_ns()
     try:
@@ -126,7 +127,7 @@ def timing_ctx(name: str) -> Generator[None]:
 
 
 @dataclass
-class RuntoolCache:
+class DiskCache:
     cache_file: str | None = None
     _data: defaultdict[str, dict[str, CacheEntry]] = field(
         init=False, default_factory=lambda: defaultdict(dict), repr=False
@@ -137,15 +138,15 @@ class RuntoolCache:
         logger.debug("Accessing cache data")
         if self.cache_file and os.path.isfile(self.cache_file):
             logger.debug("Loading cache from %s", self.cache_file)
-            with timing_ctx("Load cache"), open(self.cache_file) as f:
+            with time_block("Load cache"), open(self.cache_file) as f:
                 self._data.update(json.load(f))
                 logger.debug("Loaded cache from %s", self.cache_file)
 
-        atexit.register(self.save)
+        atexit.register(self.save_to_disk)
 
         return self._data
 
-    def save(self) -> None:
+    def save_to_disk(self) -> None:
         if self.cache_file:
             os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
             with open(self.cache_file, "w") as f:
@@ -162,7 +163,7 @@ class RuntoolCache:
 
             @functools.wraps(func)
             def inner2(*args: P.args, **kwargs: P.kwargs) -> R:
-                with timing_ctx(f"Cache check for {func_name}"):
+                with time_block(f"Cache check for {func_name}"):
                     if int(os.getenv("NO_CACHE", "0")) == 1:
                         logger.debug("NO_CACHE is set, skipping cache.")
                         return func(*args, **kwargs)
@@ -171,12 +172,12 @@ class RuntoolCache:
                         int(os.getenv("RE_CACHE", "0")) == 1
                         or func_name not in self.data
                         or key not in self.data[func_name]
-                        or (self.data[func_name][key]["timestampt"] + _delta.total_seconds())
+                        or (self.data[func_name][key]["timestamp"] + _delta.total_seconds())
                         < time.time()
                     ):
                         logger.debug("Cache miss or expired for %s %s", func_name, key)
                         result: R = func(*args, **kwargs)
-                        entry: CacheEntry = {"data": result, "timestampt": time.time()}
+                        entry: CacheEntry = {"data": result, "timestamp": time.time()}
                         self.data[func_name][key] = entry
                         return result
                     logger.debug("Cache hit for %s %s", func_name, key)
@@ -188,10 +189,10 @@ class RuntoolCache:
 
 
 DEFAULT_ROOT = os.path.expanduser("~/opt/runtool")
-runtool_cache = RuntoolCache(os.path.join(DEFAULT_ROOT, "runtool_cache.json"))
+runtool_cache = DiskCache(os.path.join(DEFAULT_ROOT, "runtool_cache.json"))
 
 
-def request(  # noqa: C901, PLR0912
+def http_request(  # noqa: C901, PLR0912
     url: str, *, method: HTTP_METHOD = "GET", **kwargs: Unpack[_CompleteRequestArgs]
 ) -> HTTPResponse:
     import urllib.parse
@@ -244,6 +245,7 @@ def request(  # noqa: C901, PLR0912
         data = json.dumps(json_content).encode("utf-8")  # type: ignore[assignment]
 
     verify = kwargs.get("verify")
+    verify = verify or False  # NOTE: Default to False if not provided
     context: ssl.SSLContext | None
 
     if verify is None:
@@ -287,9 +289,9 @@ CONTENT_DISPOTION_PATTERN = re.compile(r'filename\*?=(?:UTF-8\'\')?\"?([^"]+)\"?
 
 
 @contextmanager
-def download_file(url: str) -> Generator[str]:
+def fetch_temp_file(url: str) -> Generator[str]:
     """Download a file from a URL to a temporary location."""
-    response = request(url)
+    response = http_request(url)
     filename: str = next(
         iter(CONTENT_DISPOTION_PATTERN.findall(response.headers["content-disposition"] or "")), None
     ) or os.path.basename(urlparse(url).path)
@@ -301,31 +303,48 @@ def download_file(url: str) -> Generator[str]:
 
 
 @contextmanager
-def download_and_extract(url: str) -> Generator[str]:
+def fetch_and_extract_archive(url: str) -> Generator[str]:
     """
     Download and extract an archive from a URL.
     Yields the path to the extracted directory.
     """
-    with download_file(url) as downloaded_file_path:
+    with fetch_temp_file(url) as downloaded_file_path:
         extraction_temp_dir = os.path.dirname(downloaded_file_path)
+
         opener = (
             zipfile.ZipFile
             if zipfile.is_zipfile(downloaded_file_path)
-            else (tarfile.open if tarfile.is_tarfile(downloaded_file_path) else None)
+            else (
+                tarfile.open
+                if tarfile.is_tarfile(downloaded_file_path)
+                else (gzip.open if downloaded_file_path.endswith(".gz") else None)
+            )
         )
         if not opener:
             # downloaded file is not an archive
             yield extraction_temp_dir
             return
+
         _basename, e = os.path.splitext(downloaded_file_path)
         if not e:
             # Assume no extension means this is an executable, mainly to handle shiv apps
             yield extraction_temp_dir
             return
+
         with tempfile.TemporaryDirectory() as extraction_temp_directory:
             try:
                 with opener(downloaded_file_path) as f:
-                    f.extractall(extraction_temp_directory)  # noqa: S202
+                    if isinstance(f, gzip.GzipFile):
+                        with open(
+                            os.path.join(
+                                extraction_temp_directory,
+                                os.path.basename(downloaded_file_path[:-3]),
+                            ),
+                            "wb",
+                        ) as out_f:
+                            out_f.write(f.read())
+                    else:
+                        f.extractall(extraction_temp_directory)  # noqa: S202
             except ValueError:
                 yield extraction_temp_dir
                 return
@@ -340,12 +359,12 @@ def download_and_extract(url: str) -> Generator[str]:
             yield extraction_temp_directory
 
 
-def ensure_executable(filename: str) -> None:
+def make_executable(filename: str) -> None:
     """Ensure the given file is executable."""
     os.chmod(filename, os.stat(filename).st_mode | stat.S_IEXEC)
 
 
-def test_file_executable(filename: str) -> bool:
+def is_executable_file(filename: str) -> bool:
     """Return True if the given file is an executable binary."""
     original_mode = os.stat(filename).st_mode
     os.chmod(filename, original_mode | stat.S_IEXEC)
@@ -358,7 +377,7 @@ def test_file_executable(filename: str) -> bool:
     return True
 
 
-def filter_nonempty(func: Callable[[T], object], iterable: Iterable[T]) -> list[T]:
+def filter_or_return_all(func: Callable[[T], object], iterable: Iterable[T]) -> list[T]:
     """
     Filter an iterable with a function, returning the original iterable if the result is empty.
     """
@@ -367,7 +386,7 @@ def filter_nonempty(func: Callable[[T], object], iterable: Iterable[T]) -> list[
     return ret or original
 
 
-def classify_file(path: str) -> Literal["text", "binary", "ascii"]:
+def detect_file_type(path: str) -> Literal["text", "binary", "ascii"]:
     """
     Return 'ascii', 'text', or 'binary' using a simple content heuristic.
     """
@@ -392,24 +411,24 @@ def classify_file(path: str) -> Literal["text", "binary", "ascii"]:
 
 
 @contextmanager
-def link_installer_helper(link: str) -> Generator[tuple[str, list[str]]]:
-    with download_and_extract(link) as downloaded_directory:
+def resolve_downloaded_binaries(link: str) -> Generator[tuple[str, list[str]]]:
+    with fetch_and_extract_archive(link) as downloaded_directory:
         if not os.path.isdir(downloaded_directory):
             logger.error("Downloaded file is not a directory!")
             raise SystemExit(1)
         bin_files = glob(os.path.join(os.path.join(downloaded_directory, "bin", "*"))) or glob(
             os.path.join(os.path.join(downloaded_directory, "*"))
         )
-        bin_files = filter_nonempty(os.path.isfile, bin_files)
-        bin_files = filter_nonempty(lambda x: not x.endswith(".1"), bin_files)  # man pages
-        bin_files = filter_nonempty(lambda x: "page" not in x, bin_files)
-        bin_files = filter_nonempty(lambda x: not x.endswith(".sh"), bin_files)
-        bin_files = filter_nonempty(lambda x: classify_file(x) == "binary", bin_files)
-        bin_files = list(filter(test_file_executable, bin_files))
+        bin_files = filter_or_return_all(os.path.isfile, bin_files)
+        bin_files = filter_or_return_all(lambda x: not x.endswith(".1"), bin_files)  # man pages
+        bin_files = filter_or_return_all(lambda x: "page" not in x, bin_files)
+        bin_files = filter_or_return_all(lambda x: not x.endswith(".sh"), bin_files)
+        bin_files = filter_or_return_all(lambda x: detect_file_type(x) == "binary", bin_files)
+        bin_files = list(filter(is_executable_file, bin_files))
         yield downloaded_directory, bin_files
 
 
-def link_installer(link: str, package_dir: str) -> InstallationMetadata:
+def install_from_link(link: str, package_dir: str) -> InstallationMetadata:
     link_hash = hashlib.md5(link.encode("utf-8"), usedforsecurity=False).hexdigest()
     installed_package_directory = os.path.join(package_dir, link_hash)
     package_metadata_file = os.path.join(installed_package_directory, "package.json")
@@ -417,7 +436,7 @@ def link_installer(link: str, package_dir: str) -> InstallationMetadata:
         with open(package_metadata_file) as f:
             return json.load(f)
 
-    with link_installer_helper(link) as (downloaded_package, bin_files):
+    with resolve_downloaded_binaries(link) as (downloaded_package, bin_files):
         if not bin_files:
             msg = "No binary files found in the downloaded package."
             raise RuntimeError(msg)
@@ -441,6 +460,52 @@ def link_installer(link: str, package_dir: str) -> InstallationMetadata:
         #         continue
         #     ensure_executable(bin_file)
         #     os.symlink(bin_file, symlink_name)
+
+
+@functools.cache
+def print_once(message: str) -> None:
+    """Print a message only once."""
+    print(message, file=sys.stderr)
+
+
+def check_bin_dir_in_path(bin_dir: str) -> None:
+    if not any(
+        (os.path.abspath(p) == os.path.abspath(bin_dir))
+        for p in os.getenv("PATH", "").split(os.pathsep)
+    ):
+        _bin_dir = bin_dir.replace("${HOME}", os.path.expanduser("~"))
+        print_once(
+            dedent(
+                f"""
+            WARNING: {_bin_dir} is not in your PATH environment variable.
+            You may want to add the following line to your shell profile:
+
+                export PATH="{_bin_dir}:${{PATH}}"
+            """
+            ).strip()
+        )
+
+
+def get_fixed_name(bin_file: str) -> str:
+    bin_file = os.path.basename(bin_file).split("_", maxsplit=1)[0]
+    pattern = re.compile(
+        r"(macosx|macos|darwin|linux|windows|win32|amd64|x86_64|arm64|aarch64)", re.IGNORECASE
+    )
+    fixed_name = pattern.sub("", bin_file)
+    fixed_name = re.sub(r"[-_]+", "-", fixed_name).strip("-")
+    return fixed_name  # noqa: RET504
+
+
+def symlink_installed_binaries(executables: list[str], bin_dir: str) -> None:
+    check_bin_dir_in_path(bin_dir)
+    os.makedirs(bin_dir, exist_ok=True)
+    for bin_file in executables:
+        symlink_name = os.path.join(bin_dir, get_fixed_name(bin_file))
+        if os.path.exists(symlink_name):
+            logger.info("%s already exists, skipping symlink creation.", symlink_name)
+            continue
+        make_executable(bin_file)
+        os.symlink(bin_file, symlink_name)
 
 
 class GithubRelease(NamedTuple):
@@ -469,23 +534,23 @@ class GithubRelease(NamedTuple):
 
     @staticmethod
     @runtool_cache(days=1)
-    def gh_get_versions(base_url: str, owner: str, repo: str) -> list[str]:
-        html_content = request(f"{base_url}/{owner}/{repo}/releases").read().decode()
+    def fetch_release_tags(base_url: str, owner: str, repo: str) -> list[str]:
+        html_content = http_request(f"{base_url}/{owner}/{repo}/releases").read().decode()
         release_tags = re.findall(rf"/{owner}/{repo}/releases/tag/(?P<tag>[^'\"]+)", html_content)
         return [*dict.fromkeys(release_tags).keys()]
 
     @runtool_cache(days=1)
-    def links(self) -> list[str]:
+    def get_asset_links(self) -> list[str]:
         tag = self.tag
         if not tag:
             logger.warning("Tag is empty, fetching latest tag.")
-            versions = self.gh_get_versions(self.base_url, self.owner, self.repo)
+            versions = self.fetch_release_tags(self.base_url, self.owner, self.repo)
             if not versions:
                 msg = "No versions found."
                 raise ValueError(msg)
             tag = versions[0]
         release_assets_html = (
-            request(f"{self.base_url}/{self.owner}/{self.repo}/releases/expanded_assets/{tag}")
+            http_request(f"{self.base_url}/{self.owner}/{self.repo}/releases/expanded_assets/{tag}")
             .read()
             .decode()
         )
@@ -496,70 +561,85 @@ class GithubRelease(NamedTuple):
         return sorted({f"{self.base_url}{x}" for x in retrieve_download_links})
 
 
-def filter_links(links: Iterable[str], system: str, machine: str) -> list[str]:
+SYSTEMS_MAP = {
+    "darwin": ["darwin", "macos", "apple", "osx"],
+}
+MACHINES_MAP = {
+    "arm64": ["arm64", "aarch64", "universal"],
+}
+
+
+def select_compatible_links(links: Iterable[str], system: str, machine: str) -> list[str]:
     """Filter links based on system and machine."""
     dct = [(os.path.basename(x).lower(), x) for x in links]
-    systems = {
-        "darwin": ["darwin", "macos", "apple", "osx"],
-    }.get(system.lower(), [])
+    systems = SYSTEMS_MAP.get(system.lower(), [])
 
-    dct = filter_nonempty(lambda x: any((i in x[0]) for i in systems), dct)
-    machines = {
-        "arm64": ["arm64", "aarch64", "universal"],
-    }.get(machine.lower(), [])
-    dct = filter_nonempty(lambda x: any((i in x[0]) for i in machines), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__(".sha"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__(".json"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__(".sbom"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__(".provenance"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__(".whl"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__("32-bit"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__("lib"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__("no-web"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__("denort"), dct)
-    dct = filter_nonempty(lambda x: not x[0].__contains__("static"), dct)
-    dct = filter_nonempty(lambda x: x[0].__contains__(".tgz"), dct)
-    dct = filter_nonempty(lambda x: x[0].__contains__(".tar"), dct)
-    dct = filter_nonempty(lambda x: x[0].__contains__(".zip"), dct)
+    dct = filter_or_return_all(lambda x: any((i in x[0]) for i in systems), dct)
+    machines = MACHINES_MAP.get(machine.lower(), [])
+    dct = filter_or_return_all(lambda x: any((i in x[0]) for i in machines), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__(".sha"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__(".json"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__(".sbom"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__(".provenance"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__(".whl"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("32-bit"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("lib"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("no-web"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("denort"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("static"), dct)
+    dct = filter_or_return_all(lambda x: not x[0].__contains__("tar.gz"), dct)
+    dct = filter_or_return_all(lambda x: x[0].__contains__("ventura"), dct)
+    dct = filter_or_return_all(lambda x: x[0].__contains__(".tgz"), dct)
+    dct = filter_or_return_all(lambda x: x[0].__contains__(".tar"), dct)
+    dct = filter_or_return_all(lambda x: x[0].__contains__(".zip"), dct)
     return [x[1] for x in dct]
 
 
-class Runtool(NamedTuple):
-    packages_dir: str = os.environ.get(
-        "RUNTOOL_PACKAGES_DIR", os.path.join(DEFAULT_ROOT, "packages")
+@dataclass
+class RuntoolManager:
+    packages_dir: str = field(
+        default_factory=lambda: os.environ.get(
+            "RUNTOOL_PACKAGES_DIR", os.path.join(DEFAULT_ROOT, "packages")
+        )
     )
-    bin_dir: str = os.environ.get("RUNTOOL_BIN_DIR", os.path.join(DEFAULT_ROOT, "bin"))
-    system: str = platform.system()
-    machine: str = platform.machine()
+    bin_dir: str = field(
+        default_factory=lambda: os.environ.get("RUNTOOL_BIN_DIR", os.path.join(DEFAULT_ROOT, "bin"))
+    )
+    system: str = field(default_factory=platform.system)
+    machine: str = field(default_factory=platform.machine)
 
-    def gh_get_bin(self, base_url: str, owner: str, repo: str, tag: str | None = None) -> list[str]:
+    def install_from_github(
+        self, base_url: str, owner: str, repo: str, tag: str | None = None
+    ) -> list[str]:
         gh = GithubRelease(
             base_url=base_url,
             owner=owner,
             repo=repo,
             tag=tag or "",
         )
-        return self.install_best_link(gh.links())
+        return self.install_best_asset(gh.get_asset_links())
 
-    def install_best_link(self, links: list[str]) -> list[str]:
-        filtered_links = filter_links(links, self.system, self.machine)
+    def install_best_asset(self, links: list[str]) -> list[str]:
+        filtered_links = select_compatible_links(links, self.system, self.machine)
         if not filtered_links:
             return []
         best_link = filtered_links[0]
-        return self.install_link(best_link)
+        return self.install_from_link(best_link)
 
-    def install_link(self, link: str) -> list[str]:
-        return link_installer(link, package_dir=self.packages_dir)["bin_files"]
+    def install_from_link(self, link: str) -> list[str]:
+        ret = install_from_link(link, package_dir=self.packages_dir)
+        symlink_installed_binaries(ret["bin_files"], self.bin_dir)
+        return ret["bin_files"]
 
 
-_runtool = Runtool()
+_runtool_manager = RuntoolManager()
 ################################################################################
 # region: Commands
 ################################################################################
 __PROG__ = None
 
 
-class FilterLinks(NamedTuple):
+class FilterLinksCommand(NamedTuple):
     links: list[str]
     machine: str
     system: str
@@ -587,15 +667,15 @@ class FilterLinks(NamedTuple):
         return parser
 
     @staticmethod
-    def run(args: FilterLinks, others: list[str] | None = None) -> int:  # noqa: ARG004
-        for link in filter_links(
+    def run(args: FilterLinksCommand, others: list[str] | None = None) -> int:  # noqa: ARG004
+        for link in select_compatible_links(
             args.links or sys.stdin.readlines(), system=args.system, machine=args.machine
         ):
             print(link)
         return 0
 
 
-class LinkInstaller(NamedTuple):
+class LinkInstallCommand(NamedTuple):
     link: str
 
     @staticmethod
@@ -611,12 +691,12 @@ class LinkInstaller(NamedTuple):
         return parser
 
     @staticmethod
-    def run(args: LinkInstaller, others: list[str] | None = None) -> int:  # noqa: ARG004
-        _runtool.install_link(args.link)
+    def run(args: LinkInstallCommand, others: list[str] | None = None) -> int:  # noqa: ARG004
+        _runtool_manager.install_from_link(args.link)
         return 0
 
 
-class GHInstall(NamedTuple):
+class GithubInstallCommand(NamedTuple):
     link: str
 
     @staticmethod
@@ -632,14 +712,14 @@ class GHInstall(NamedTuple):
         return parser
 
     @staticmethod
-    def run(args: GHInstall, others: list[str] | None = None) -> int:  # noqa: ARG004
+    def run(args: GithubInstallCommand, others: list[str] | None = None) -> int:  # noqa: ARG004
         gh = GithubRelease.from_url(args.link)
-        _runtool.install_best_link(gh.links())
+        _runtool_manager.install_best_asset(gh.get_asset_links())
         # Create symlinks in BIN_DIR
         return 0
 
 
-class Sample(NamedTuple):
+class SampleCommand(NamedTuple):
     @staticmethod
     def arg_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
         parser = parser or argparse.ArgumentParser()
@@ -652,14 +732,14 @@ class Sample(NamedTuple):
         return parser
 
     @staticmethod
-    def run(args: Sample, others: list[str] | None = None) -> int:  # noqa: ARG004
+    def run(args: SampleCommand, others: list[str] | None = None) -> int:  # noqa: ARG004
         return 0
 
 
 CMDS: Mapping[str, str] = {
     "act": "https://github.com/nektos/act",
     "bat": "https://github.com/sharkdp/bat",
-    "btop": "https://github.com/aristocratos/btop",
+    "btop": "https://github.com/aristocratos/btop/releases/tag/v1.2.13",
     "charm": "https://github.com/charmbracelet/charm",
     "cli": "https://github.com/cli/cli",
     "code-server": "https://github.com/coder/code-server",
@@ -691,8 +771,8 @@ CMDS: Mapping[str, str] = {
     "rclone": "https://github.com/rclone/rclone",
     "ripgrep": "https://github.com/BurntSushi/ripgrep",
     "ruff": "https://github.com/astral-sh/ruff",
-    "sh": "https://github.com/mvdan/sh",
     "shellcheck": "https://github.com/koalaman/shellcheck",
+    "shfmt": "https://github.com/mvdan/sh",
     "shiv": "https://github.com/linkedin/shiv",
     "skate": "https://github.com/charmbracelet/skate",
     "soft-serve": "https://github.com/charmbracelet/soft-serve",
@@ -701,15 +781,15 @@ CMDS: Mapping[str, str] = {
     "tldr": "https://github.com/isacikgoz/tldr",
     "uv": "https://github.com/astral-sh/uv",
     "vhs": "https://github.com/charmbracelet/vhs",
-    "wasmer": "https://github.com/wasmerio/wasmer",
-    "watchman": "https://github.com/facebook/watchman",
+    "wasmer-headless": "https://github.com/wasmerio/wasmer",
+    "watchman": "https://github.com/facebook/watchman/releases/tag/v2023.05.01.00",
     "xq": "https://github.com/sibprogrammer/xq",
     "yq": "https://github.com/mikefarah/yq",
     "zellij": "https://github.com/zellij-org/zellij",
 }
 
 
-class Run(NamedTuple):
+class RunCommand(NamedTuple):
     cmd: str
 
     @staticmethod
@@ -725,27 +805,31 @@ class Run(NamedTuple):
         return parser
 
     @staticmethod
-    def run(args: Run, others: list[str] | None = None) -> int:
-        link = CMDS[args.cmd]
-        gh = GithubRelease.from_url(link)
-        links = _runtool.gh_get_bin(base_url=gh.base_url, owner=gh.owner, repo=gh.repo, tag=gh.tag)
+    def run(args: RunCommand, others: list[str] | None = None) -> int:
+        bin_path = os.path.join(_runtool_manager.bin_dir, args.cmd)
+        if not os.path.isfile(bin_path):
+            link = CMDS[args.cmd]
+            gh = GithubRelease.from_url(link)
+            links = _runtool_manager.install_from_github(
+                base_url=gh.base_url, owner=gh.owner, repo=gh.repo, tag=gh.tag
+            )
 
-        links = filter_nonempty(lambda x: x.split("_")[0] == args.cmd, links)
-        bin_path = links[0]
-        runtool_cache.save()  # Save cache before exec
+            links = filter_or_return_all(lambda x: x.split("_")[0] == args.cmd, links)
+            bin_path = links[0]
+        runtool_cache.save_to_disk()  # Save cache before exec
         logger.debug("Executing %s", bin_path)
         os.execvp(bin_path, [bin_path] + (others or []))  # noqa: S606
 
 
 SUBCOMMANDS: dict[str, Subcommand] = {
-    "run": Run,
-    "gh-install": GHInstall,
-    "filter-links": FilterLinks,
-    "link-installer": LinkInstaller,
+    "run": RunCommand,
+    "install-gh": GithubInstallCommand,
+    "install-link": LinkInstallCommand,
+    "filter-links": FilterLinksCommand,
 }
 
 
-class Main(NamedTuple):
+class MainCLI(NamedTuple):
     verbose: bool
     command: str
 
@@ -754,10 +838,13 @@ class Main(NamedTuple):
         parser = parser or argparse.ArgumentParser(prog=__PROG__)
         parser.description = "Runtool - A tool to manage command line tools installation."
         parser.formatter_class = argparse.RawTextHelpFormatter
-        # parser.epilog = dedent("""\
-        # Examples:
-        #   %(prog)s gh-install <GitHub release URL>
-        # """)
+        parser.epilog = dedent("""\
+        Environment Variables:
+            RUNTOOL_PACKAGES_DIR   Directory to store installed packages. (default: ~/opt/runtool/packages)
+            RUNTOOL_BIN_DIR        Directory to store symlinks to binaries. (default: ~/opt/runtool/bin)
+            NO_CACHE               If set to 1, disables caching.
+            RE_CACHE               If set to 1, forces re-caching of all operations.
+        """)  # noqa: E501
 
         parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging.")
 
@@ -767,12 +854,12 @@ class Main(NamedTuple):
             description="Available subcommands",
         )
         for name, cmd in SUBCOMMANDS.items():
-            _parser = subparsers.add_parser(name, add_help=cmd not in (Run,))
+            _parser = subparsers.add_parser(name, add_help=cmd not in (RunCommand,))
             cmd.arg_parser(_parser)
         return parser
 
     @staticmethod
-    def run(args: Main, others: list[str] | None = None) -> int:
+    def run(args: MainCLI, others: list[str] | None = None) -> int:
         logging.basicConfig(
             level=logging.DEBUG if args.verbose else logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -781,7 +868,7 @@ class Main(NamedTuple):
         return cmd_class.run(args, others)
 
 
-def runner(cls: type[Subcommand], argv: Argv = None) -> int:
+def execute_subcommand(cls: type[Subcommand], argv: Argv = None) -> int:
     parser = cls.arg_parser()
     args, others = parser.parse_known_args(argv)
     return cls.run(args, others)
@@ -791,7 +878,7 @@ def runner(cls: type[Subcommand], argv: Argv = None) -> int:
 # endregion: Commands
 ################################################################################
 def main(argv: Argv = None) -> int:
-    return runner(Main, argv)
+    return execute_subcommand(MainCLI, argv)
 
 
 if __name__ == "__main__":
