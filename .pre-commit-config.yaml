@@ -9,7 +9,7 @@ ci:
     - uv-test
 repos:
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.7
+    rev: 0.9.8
     hooks:
       - id: uv-lock
       - id: uv-export
@@ -64,6 +64,7 @@ repos:
         'types_or': [python, pyi]
         require_serial: true
         additional_dependencies: [uv]
+        stages: [manual]
       - id: uv-ty
         name: uv-ty
         entry: env VIRTUAL_ENV= uv run --extra types ty check

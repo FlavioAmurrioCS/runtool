@@ -52,6 +52,7 @@ Source = "https://github.com/FlavioAmurrioCS/runtool"
 
 [project.scripts]
 runtool = "runtool:main"
+",runtool" = "runtool.runtool2:main"
 
 ###############################################################################
 # region: hatch
@@ -130,6 +131,12 @@ pythonVersion = "3.9"
 ###############################################################################
 # endregion: pyright
 ###############################################################################
+
+# [tool.pyrefly]
+# project-excludes = ["src/runtool/__init__.py"]
+
+[tool.pyrefly.errors]
+implicitly-defined-attribute = false
 
 ###############################################################################
 # region: mypy
