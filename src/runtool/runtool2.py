@@ -38,10 +38,9 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from http.client import HTTPResponse
     from typing import Any
+    from typing import Literal
     from typing import TypeVar
-    from typing import Union
 
-    from typing_extensions import Literal
     from typing_extensions import NotRequired
     from typing_extensions import ParamSpec
     from typing_extensions import Protocol
@@ -53,11 +52,11 @@ if TYPE_CHECKING:
     #     FileContent,
     #     tuple[Optional[str], FileContent],
     # ]
-    _Params = Union[dict[str, Any], tuple[tuple[str, Any], ...], list[tuple[str, Any]], None]
+    _Params = dict[str, Any] | tuple[tuple[str, Any], ...] | list[tuple[str, Any]] | None
 
     HTTP_METHOD = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"]
 
-    JSON = Union[None, bool, int, float, str, list["JSON"], dict[str, "JSON"]]
+    JSON = None | bool | int | float | str | list["JSON"] | dict[str, "JSON"]
 
     class _CompleteRequestArgs(TypedDict):
         # url: str
@@ -102,7 +101,7 @@ if TYPE_CHECKING:
         def run(args: Any, others: list[str] | None = None) -> int:  # noqa: ANN401
             ...
 
-    Argv = Union[list[str], tuple[str, ...], None]
+    Argv = list[str] | tuple[str, ...] | None
 
     class InstallationMetadata(TypedDict):
         link: str

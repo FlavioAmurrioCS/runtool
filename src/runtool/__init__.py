@@ -31,7 +31,6 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import NamedTuple
-from typing import Union
 from typing import overload
 from urllib.parse import urljoin
 from urllib.parse import urlparse
@@ -42,13 +41,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Literal
     from typing import Protocol  # python3.8+
+    from typing import TypeAlias
 
     import requests
     from requests import PreparedRequest
     from typing_extensions import Self
-    from typing_extensions import TypeAlias
 
-    JSON_TYPE: TypeAlias = Union[str, int, float, bool, None, list[Any], dict[str, Any]]
+    JSON_TYPE: TypeAlias = str | int | float | bool | None | list[Any] | dict[str, Any]
 else:
     Protocol = object
 
