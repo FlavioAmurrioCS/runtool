@@ -1,3 +1,4 @@
+#:schema https://www.schemastore.org/pyproject.json
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
@@ -7,7 +8,7 @@ name = "runtool"
 dynamic = ["version"]
 description = "Install binary from github release."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 keywords = ["github", "release", "install", "binary"]
 authors = [
@@ -16,7 +17,6 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -31,18 +31,37 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tests = [
+
+[dependency-groups]
+dev = [
+  { include-group = "test" },
+  { include-group = "types" },
+]
+test = [
   "pytest",
   "tomli ; python_version < '3.11'",
 ]
-types = [
-  "runtool[tests]",
+types_packages = [
+  { include-group = "test" },
   "typing-extensions",
+  "types-requests",
+]
+types = [
+  { include-group = "types_packages" },
   "mypy",
+]
+types_other = [
+  { include-group = "types_packages" },
   "pyrefly",
   "pyright[nodejs]",
   "ty",
-  "types-requests",
+]
+docs = [
+  "zensical",
+  "mkdocs-material",
+  "mkdocs-marimo",
+  "pymdown-extensions",
+  "click==8.2.1",
 ]
 
 [project.urls]
@@ -52,6 +71,7 @@ Source = "https://github.com/FlavioAmurrioCS/runtool"
 
 [project.scripts]
 runtool = "runtool:main"
+",runtool" = "runtool.runtool2:main"
 
 ###############################################################################
 # region: hatch
@@ -63,14 +83,13 @@ source = "vcs"
 version-file = "src/runtool/_version.py"
 
 [tool.hatch.envs.hatch-test]
-extra-dependencies = [
-  "runtool[tests]",
+dependency-groups = [
+  "test",
 ]
 
 [tool.hatch.envs.types]
-extra-dependencies = [
-  "mypy>=1.0.0",
-  "runtool[types]",
+dependency-groups = [
+  "types",
 ]
 
 [tool.hatch.envs.types.scripts]
@@ -78,7 +97,6 @@ check = "mypy --install-types --non-interactive {args:src/runtool tests}"
 
 [[tool.hatch.envs.hatch-test.matrix]]
 python = [
-  "3.9",
   "3.10",
   "3.11",
   "3.12",
@@ -126,7 +144,7 @@ exclude_lines = [
 # region: pyright
 ###############################################################################
 [tool.pyright]
-pythonVersion = "3.9"
+pythonVersion = "3.10"
 ###############################################################################
 # endregion: pyright
 ###############################################################################
@@ -135,7 +153,7 @@ pythonVersion = "3.9"
 # region: mypy
 ###############################################################################
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
