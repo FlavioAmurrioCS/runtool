@@ -1086,7 +1086,9 @@ class CLIApp(Protocol):
             if "None" in ztype:
                 field_arg = f"--{field.replace('_', '-')}"
             if "Literal" in ztype:
-                kwargs["choices"] = eval(ztype.split("Literal")[1].split("[")[1].split("]")[0])  # noqa: S307
+                kwargs["choices"] = eval(
+                    ztype.split("Literal")[1].split("[")[1].split("]", maxsplit=1)[0]
+                )  # noqa: S307
             parser.add_argument(field_arg, **kwargs)  # type: ignore[arg-type]
         return parser
 
